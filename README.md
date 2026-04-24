@@ -73,15 +73,19 @@ kubectl cluster-info --context kind-gdgoc-local
 kubectl get nodes
 ```
 
-## 🚢 Part 3: Deploy & Scale in Kubernetes (40 นาที)
+## 🚢 Part 3: Deploy & Access the App (25 นาที)
+
+เราจะย้ายแอปพลิเคชันจาก Docker ธรรมดา ขึ้นมาอยู่บน Kubernetes และเปิดช่องทางให้เครื่องเราเข้าถึงได้
+
 ### 3.1 โหลด Image เข้าสู่ K8s Cluster
-เนื่องจาก KIND รันอยู่ในพื้นที่ปิด มันจึงไม่เห็น my-app:v1 ที่เราเพิ่งสร้าง เราต้องโหลดเข้าไปใน Cluster ก่อน:
+เนื่องจาก KIND รันอยู่ในพื้นที่ปิด มันจึงไม่เห็น `my-app:v1` ที่เราเพิ่งสร้าง เราต้องโหลดเข้าไปใน Cluster ก่อน:
+
 ```bash
 kind load docker-image my-app:v1 --name gdgoc-local
 ```
 
 ### 3.2 สร้าง Deployment (สั่งให้ K8s ดูแลแอป)
-สร้างไฟล์ชื่อ deployment.yaml เพื่ออธิบายว่าเราต้องการรันแอปหน้าตาแบบไหนและจำนวนเท่าไหร่:
+สร้างไฟล์ชื่อ `deployment.yaml` เพื่ออธิบายว่าเราต้องการรันแอปหน้าตาแบบไหนและจำนวนเท่าไหร่:
 ```bash
 apiVersion: apps/v1
 kind: Deployment
@@ -108,37 +112,90 @@ spec:
 ```bash
 kubectl apply -f deployment.yaml
 ```
-
-### 3.3 ตรวจสอบ Pods
+ดู pods
 ```bash
 kubectl get pods
 ```
 
-### 3.4 ทดลอง Scaling!
-สมมติว่าตอนนี้มี Traffic เข้าเว็บเรามหาศาล เราต้องการเพิ่มเครื่องด่วน! เราสามารถสั่ง Scale ได้ทันที:
-```bash
-kubectl scale deployment web-deployment --replicas=5
-```
-
-## 🌐 Part 4: Accessing the App & Wrap-up (20 นาที)
-
-แอปพลิเคชันเรารันอยู่บน K8s แล้ว 5 ตัว แต่ตอนนี้มันอยู่ภายในเครือข่ายของ K8s เราจะเปิดช่องทางให้เครื่องเราเข้าไปใช้งานได้ผ่าน Port Forwarding (เหมาะสำหรับ Dev/Test local)
-
-### 4.1 เปิดช่องทางเข้าถึง (Port Forward)
+### 3.3 เปิดช่องทางเข้าถึง (Port Forward)
+แอปพลิเคชันเรารันอยู่บน K8s แล้ว 2 ตัว แต่ยังอยู่ภายในเครือข่ายจำลอง เราจะเปิดอุโมงค์เชื่อมต่อ (เหมาะสำหรับ Dev/Test local):
 ```bash
 kubectl port-forward deployment/web-deployment 8000:80
 ```
-👉 ทดสอบ: เปิด Web Browser ไปที่ http://localhost:8000
-Traffic ของคุณจะวิ่งเข้าสู่ 1 ใน 5 Pods ที่เราสร้างไว้อัตโนมัติ!
+👉 **ทดสอบ:** เปิด Web Browser ไปที่ `http://localhost:8000` (ปล่อย Terminal นี้รันค้างไว้)
 
-### 4.2 Cleanup (ทำความสะอาดเครื่อง)
-อย่าลืมทำความสะอาด Resource เพื่อไม่ให้เปลือง Memory เครื่องครับ:
+## 🚀 Part 4: Day 2 Operations - Scaling & Zero-Downtime Update (40 นาที)
+
+*(⚠️ คำแนะนำ: ให้เปิด Terminal หน้าต่างใหม่ สำหรับรันคำสั่งในส่วนนี้ เพื่อไม่ให้กระทบกับ Port-forward ที่รันค้างไว้)*
+
+นี่คือเวทมนตร์ของ Kubernetes! เราจะมาจัดการแอปพลิเคชันของเราเมื่อมีคนใช้งานเยอะขึ้น และเมื่อเราต้องการอัปเดตเวอร์ชันใหม่
+
+### 4.1 Horizontal Scaling (การสเกลแนวนอน)
+สมมติว่ามี Traffic เข้าเว็บเรามหาศาล เราต้องการเพิ่มเครื่องด่วน! เราสามารถสั่ง Scale ได้ทันที:
 ```bash
-# กด Ctrl+C เพื่อหยุด Port-forward
-# ลบ K8s Cluster
-kind delete cluster --name gdgoc-local
+kubectl scale deployment web-deployment --replicas=5
+```
+ดูผลลัพธ์การสร้าง Pods ใหม่แบบสดๆ (กด Ctrl+C เพื่อออกจากการ watch)
+```bash
+kubectl get pods -w
+```
+Traffic ของคุณตอนนี้กำลังวิ่งกระจายเข้าสู่ 1 ใน 5 Pods ที่เราสร้างไว้อัตโนมัติ!
 
-# ลบ Docker Container 
+### 4.2 เตรียมแอปพลิเคชันเวอร์ชัน 2 (v2)
+สมมติว่าทีม Dev ต้องการเปลี่ยนข้อความบนหน้าเว็บ เราจะเริ่มจากกลับไปแก้ Code และสร้าง Image ตัวใหม่:
+
+1. แก้ไขไฟล์ index.html
+```bash
+echo "<h1>Hello GDGOC! Welcome to Version 2 🚀🔥</h1>" > index.html
+```
+2. Build Docker Image เวอร์ชันใหม่ (สังเกต Tag เป็น :v2)
+```bash
+docker build -t my-app:v2 .
+```
+3. โหลด Image v2 เข้าสู่ KIND Cluster
+```bash
+kind load docker-image my-app:v2 --name gdgoc-local
+```
+
+### 4.3 Rolling Update (อัปเดตแบบไร้รอยต่อ)
+เราจะสั่งให้ K8s อัปเดตแอปจาก v1 เป็น v2 K8s จะใช้เทคนิค **Rolling Update** คือค่อยๆ ปิด v1 ทีละตัว และสร้าง v2 ขึ้นมาแทนที่ ทำให้เว็บไม่ล่มเลย (Zero Downtime)
+
+สั่งเปลี่ยน Image ใน Deployment เป็น v2
+```bash
+kubectl set image deployment/web-deployment my-web-app=my-app:v2
+```
+
+ดูสถานะการอัปเดต
+```bash
+kubectl rollout status deployment/web-deployment
+```
+
+👉 **ทดสอบ:** กลับไปที่ Browser (`http://localhost:8000`) แล้วกด Refresh คุณจะเห็นข้อความเปลี่ยนเป็น Version 2!
+
+### 4.4 Rollback (ถอยร่นเมื่อเกิดข้อผิดพลาด)
+ถ้าแอปเวอร์ชัน 2 มีบั๊ก เราสามารถย้อนกลับ (Rollback) ไปเวอร์ชันก่อนหน้าได้อย่างรวดเร็วในคำสั่งเดียว:
+
+สั่ง Rollback กลับไปเวอร์ชันก่อนหน้า
+```bash
+kubectl rollout undo deployment/web-deployment
+```
+ดูสถานะการย้อนกลับ
+```bash
+kubectl rollout status deployment/web-deployment
+```
+👉 **ทดสอบ:** กลับไป Refresh หน้าเว็บอีกครั้ง ทุกอย่างจะกลับมาเป็นเวอร์ชันแรกสุดอย่างปลอดภัย!
+
+## 🧹 Part 5: Cleanup & Wrap-up (10 นาที)
+
+อย่าลืมทำความสะอาด Resource เพื่อไม่ให้เปลือง Memory เครื่องครับ:
+
+1. กลับไปที่ Terminal ที่รัน Port-forward ค้างไว้ แล้วกด Ctrl+C
+2. ลบ K8s Cluster
+```bash
+kind delete cluster --name gdgoc-local
+```
+3. ลบ Docker Container 
+```bash
 docker rm -f my-first-container
 ```
-🎉 ยินดีด้วย! คุณได้เห็นเส้นทางตั้งแต่การเขียน Code -> สวมแพ็กเกจด้วย Docker -> และสเกลมันบน Kubernetes แล้ว!
+🎉 **ยินดีด้วย!** คุณได้เห็นเส้นทางตั้งแต่ Day 0 (การเขียน Code) -> สวมแพ็กเกจด้วย Docker -> และสเกลมันรวมถึงการทำ Day 2 Operations บน Kubernetes แล้ว!
